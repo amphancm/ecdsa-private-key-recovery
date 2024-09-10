@@ -29,17 +29,22 @@ MYSQL_PARMS = ("127.0.0.1", "user","","database")
 # HERE BE DRAGONS
 #
 ############################
+
+import time
+import base64
+import logging
+import MySQLdb
+import requests
+import sqlite3, os
+import pybitcointools
 from ecdsa_key_recovery import EcDsaSignature
 
 from binascii import unhexlify, hexlify
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
-import time
-import logging
+
 from pyasn1.codec.der import decoder as asn1der
-import pybitcointools
-import sqlite3, os
-import MySQLdb
-import requests
+
+
 
 logger = logging.getLogger(__name__)
 '''
@@ -49,9 +54,10 @@ logger = logging.getLogger(__name__)
 def pause(t, critical=False):
     critical = False
     if not critical:
-        print t
+        print(t)
         return
-    raw_input(t)
+    #raw_input(t)
+    input(t)
 
 def bignum_to_hex(val, nbits=256):
   ret = hex((val + (1 << nbits)) % (1 << nbits)).rstrip("L").lstrip("0x")
@@ -92,15 +98,25 @@ class BtcRpc(object):
 
         # wait for rpc to be ready
         last_exc = None
-        for _ in xrange(30):
+
+        for _ in range(30):
             try:
-                logger.info("best block: %s"%self.rpc.getbestblockhash())
-                #logger.info("block count: %s" % self.rpc.getblockcount())
+                logger.info("best block: %s" % self.rpc.getbestblockhash())
+                # logger.info("block count: %s" % self.rpc.getblockcount())
                 break
-            except Exception, e:
+            except Exception as e:
                 last_exc = e
             logger.info("trying to connect ...")
             time.sleep(2)
+        # for _ in xrange(30):
+        #     try:
+        #         logger.info("best block: %s"%self.rpc.getbestblockhash())
+        #         #logger.info("block count: %s" % self.rpc.getblockcount())
+        #         break
+        #     except Exception, e:
+        #         last_exc = e
+        #     logger.info("trying to connect ...")
+        #     time.sleep(2)
         if last_exc:
             raise last_exc
         logger.debug("connected.")
@@ -177,11 +193,11 @@ class BtcRpc(object):
 
     def get_scriptsigs(self, tx):
         trans = self.rpc.getrawtransaction(tx, 1)
-        print "trans",trans
+        print ("trans",trans)
         # tbh we only need to check vout
         for index,vin in enumerate(trans['vin']):
             sig = vin.get("scriptSig")
-            print vin
+            print (vin)
             if sig:
                 asn_sig = sig.get("hex").decode("hex")
                 asn_sequence_tag_start = asn_sig.index(
@@ -255,27 +271,27 @@ def selftest():
     t = asn1der.decode(sig2_hex.decode("hex"))
     sig2 = Signature(long(t[0][0]), long(t[0][1]))
 
-    print sig1.r, sig1.s
-    print sig2.r, sig2.s
-    print msghash1
-    print msghash2
-    print public_key_hex
+    print (sig1.r, sig1.s)
+    print (sig2.r, sig2.s)
+    print (msghash1)
+    print (msghash2)
+    print (public_key_hex)
 
 
 
     sigx1 = BTCSignature(sig=sig1, h=long(msghash1, 16), pubkey=public_key_hex.decode("hex"))
     sigx2 = BTCSignature(sig=(sig2.r, sig2.s), h=long(msghash2, 16), pubkey=public_key_hex.decode("hex"))
-    print "%r" % sigx1.recover_nonce_reuse(sigx2)
-    print sigx1.signingkey
-    print sigx1.to_btc_pubkey(), sigx1.to_btc_privkey()
-    print sigx1.pubkey_to_address(), sigx1.privkey_to_wif()
-    print sigx1.export_key()
-    print "----sigx2---"
+    print ("%r" % sigx1.recover_nonce_reuse(sigx2))
+    print (sigx1.signingkey)
+    print (sigx1.to_btc_pubkey(), sigx1.to_btc_privkey())
+    print (sigx1.pubkey_to_address(), sigx1.privkey_to_wif())
+    print (sigx1.export_key())
+    print ("----sigx2---")
 
     sig1 = EcDsaSignature(sig=sig1, h=msghash1.decode("hex"), pubkey=public_key_hex.decode("hex"))
     sig2 = EcDsaSignature(sig=(sig2.r, sig2.s), h=msghash2.decode("hex"), pubkey=public_key_hex.decode("hex"))
-    print sig1.recover_nonce_reuse(sig2)
-    print sig1.export_key()
+    print (sig1.recover_nonce_reuse(sig2))
+    print (sig1.export_key())
     raw_input("--End of Selftest -- press any key to continue--")
 
 
@@ -344,8 +360,8 @@ def verify_vin(txid, index):
     #     \---------------------- pub orig?
     import pprint
     pprint.pprint(txdump)
-    print txdump['z'].decode("hex")
-    print int(txdump['z'],16)
+    print (txdump['z'].decode("hex"))
+    print (int(txdump['z'],16))
     def fix_pubkey(p):
         if p.startswith("04"):
             return p[2:]
@@ -403,8 +419,8 @@ def verify_vin(txid, index):
 
     vk = VerifyingKey.from_string(txdump['pub'].decode("hex"), curve=curve)
     digest = txdump['z']
-    print repr(pubkey)
-    print repr(txdump['pub'])
+    print (repr(pubkey))
+    print (repr(txdump['pub']))
     z = int(digest.decode("hex"),16)
     verifies = vk.pubkey.verifies(z,Signature(sig[0],sig[1]))
     logger.debug("verify --> %s "%(verifies))
@@ -437,31 +453,50 @@ def recover_key_for_r(r):
     logger.debug("btc connect...")
     rpc = BtcRpc("http://lala:lolo@127.0.0.1:8332")
     logger.debug("btc connected!")
-    for nr,txid in enumerate(txs):
+    for nr, txid in enumerate(txs):
         try:
-            logger.debug("working txid: %r"%txid)
-            args = rpc.get_args_for_r(txid, r).next()
+            logger.debug("working txid: %r" % txid)
+            args = next(rpc.get_args_for_r(txid, r))  # Use next() for Python 3
             logger.debug("args: %r" % args)
-            bsigs.append(verify_vin(txid,args['index']))
+            bsigs.append(verify_vin(txid, args['index']))
             logger.debug("txid: %r" % txid)
-        except Exception, ae: # assertionerror
+        except Exception as ae:  # Python 3 exception handling
             logger.exception(ae)
+
+        # for nr,txid in enumerate(txs):
+        #     try:
+        #         logger.debug("working txid: %r"%txid)
+        #         args = rpc.get_args_for_r(txid, r).next()
+        #         logger.debug("args: %r" % args)
+        #         bsigs.append(verify_vin(txid,args['index']))
+        #         logger.debug("txid: %r" % txid)
+        #     except Exception, ae: # assertionerror
+        #         logger.exception(ae)
 
 
     # try all combinations to recover privkey
     # todo: might have multiple results! better yield results and filter already found ones..
     #       e.g. if multiple r but different pubkey
     import itertools
-    print bsigs
+    print (bsigs)
     ex= None
     for comb in itertools.combinations(bsigs, 2):
         try:
             comb[0].recover_from_btcsig(comb[1])
             return comb[0]
-        except AssertionError, e:
+        except AssertionError as e:  # Python 3 exception handling
             ex = e
-            print e
+            print(e)  # Python 3 print function
         pause("--nextbtcsig--")
+
+    # for comb in itertools.combinations(bsigs, 2):
+    #     try:
+    #         comb[0].recover_from_btcsig(comb[1])
+    #         return comb[0]
+    #     except AssertionError, e:
+    #         ex = e
+    #         print (e)
+    #     pause("--nextbtcsig--")
     if ex:
         raise ex
     raise Exception("--cannot-recover--")
@@ -492,43 +527,83 @@ def scriptsig_to_ecdsa_sig(asn_sig):
         's': long(dersig[0][1])}
 
 def get_sigpair_from_csv(csv_in, start=0, skip_to_tx=None, want_tx=[]):
-    want_tx=set(want_tx)
+    
+    want_tx = set(want_tx)
     skip_entries = True
-    with open(csv_in,'r') as f:
-        for nr,line in enumerate(f):
-            if nr<start:
-                if nr%100000==0:
-                    print "skip",nr,f.tell()
+
+    with open(csv_in, 'r') as f:
+        for nr, line in enumerate(f):
+            if nr < start:
+                if nr % 100000 == 0:
+                    print("skip", nr, f.tell())
                 continue
             if nr % 10000000 == 0:
-                print "10m", nr
+                print("10m", nr)
             try:
-                # read data
-                cols = line.split(";",1)
+                # Read data
+                cols = line.split(";", 1)
                 tx = cols[0].strip()
 
-                if skip_to_tx and tx==skip_to_tx:
-                    skip_entries=False
-                    # skip this entry - already in db
+                if skip_to_tx and tx == skip_to_tx:
+                    skip_entries = False
+                    # Skip this entry - already in db
                     continue
                 if skip_to_tx and skip_entries:
-                    print "skiptx",nr, tx
+                    print("skiptx", nr, tx)
                     continue
                 if want_tx and tx not in want_tx:
                     continue
 
-                scriptsig = cols[1].decode("base64")
-                #print repr(scriptsig)
-                #print pybitcointools.deserialize_script(scriptsig)
+                scriptsig = base64.b64decode(cols[1].strip())  # Use base64 decoding
+                # print(repr(scriptsig))
+                # print(pybitcointools.deserialize_script(scriptsig))
                 sig = scriptsig_to_ecdsa_sig(scriptsig)
                 sig['tx'] = tx
                 sig['nr'] = nr
                 yield sig
-            except ValueError, ve:
-                #print tx,repr(ve)
+            except ValueError as ve:  # Python 3 exception handling
+                # print(tx, repr(ve))
                 pass
-            except Exception, e:
-                print tx, repr(e)
+            except Exception as e:  # Python 3 exception handling
+                print(tx, repr(e))
+
+    # want_tx=set(want_tx)
+    # skip_entries = True
+    # with open(csv_in,'r') as f:
+    #     for nr,line in enumerate(f):
+    #         if nr<start:
+    #             if nr%100000==0:
+    #                 print ("skip",nr,f.tell())
+    #             continue
+    #         if nr % 10000000 == 0:
+    #             print ("10m", nr)
+    #         try:
+    #             # read data
+    #             cols = line.split(";",1)
+    #             tx = cols[0].strip()
+
+    #             if skip_to_tx and tx==skip_to_tx:
+    #                 skip_entries=False
+    #                 # skip this entry - already in db
+    #                 continue
+    #             if skip_to_tx and skip_entries:
+    #                 print ("skiptx",nr, tx)
+    #                 continue
+    #             if want_tx and tx not in want_tx:
+    #                 continue
+
+    #             scriptsig = cols[1].decode("base64")
+    #             #print repr(scriptsig)
+    #             #print pybitcointools.deserialize_script(scriptsig)
+    #             sig = scriptsig_to_ecdsa_sig(scriptsig)
+    #             sig['tx'] = tx
+    #             sig['nr'] = nr
+    #             yield sig
+    #         except ValueError, ve:
+    #             #print tx,repr(ve)
+    #             pass
+    #         except Exception, e:
+    #             print(tx, repr(e))
 
 def find_fixed_id_for_tx_s(f, _tx, _s):
     f.seek(0)
@@ -539,15 +614,26 @@ def find_fixed_id_for_tx_s(f, _tx, _s):
         if s.lower()==_s.lower() and tx.lower()==_tx.lower():
             return r,s,tx
 
+# def getrawtx(txid):
+#     for _ in xrange(10):
+#         e=None
+#         try:
+#             rpc = BtcRpc("http://lala:lolo@127.0.0.1:8332")
+#             return rpc.rpc.getrawtransaction(txid, 1)
+#         except Exception , e:
+#             pass
+#     raise e
+
 def getrawtx(txid):
-    for _ in xrange(10):
-        e=None
+    for _ in range(10):  # Python 3: use range instead of xrange
+        e = None
         try:
             rpc = BtcRpc("http://lala:lolo@127.0.0.1:8332")
             return rpc.rpc.getrawtransaction(txid, 1)
-        except Exception , e:
+        except Exception as e:  # Python 3 exception handling
             pass
     raise e
+
 
 def dump_tx_ecdsa(txid, i):
     tx = getrawtx(txid)
@@ -580,7 +666,7 @@ def dump_tx_ecdsa(txid, i):
         elif hashcode_txt == 'SINGLE':
             hashcode = 3
         else:
-            print hashcode_txt
+            print (hashcode_txt)
             logger.warning("xx %s %4d ERROR_UNHANDLED_HASHCODE" % (txid, hashcode_txt))
             raise
     else:
@@ -602,17 +688,29 @@ def get_balance_for_address(addr):
     r = requests.get("https://blockchain.info/de//q/addressbalance/%s"%addr)
     return int(r.text)
 
+# def check_balances():
+#     db = MySQLdb.connect(*MYSQL_PARMS)
+#     cursor = db.cursor()
+#     cursor.execute(
+#         "select address from bitcoin.privkeys")
+#     for a in cursor.fetchall():
+#         try:
+#             print ("%s - %s"%(a, get_balance_for_address(a)))
+#         except Exception, e:
+#             print ("%s - %s" % (a, e))
+#     raw_input("-->done")
+
 def check_balances():
     db = MySQLdb.connect(*MYSQL_PARMS)
     cursor = db.cursor()
-    cursor.execute(
-        "select address from bitcoin.privkeys")
+    cursor.execute("select address from bitcoin.privkeys")
     for a in cursor.fetchall():
         try:
-            print "%s - %s"%(a, get_balance_for_address(a))
-        except Exception, e:
-            print "%s - %s" % (a, e)
-    raw_input("-->done")
+            print("%s - %s" % (a, get_balance_for_address(a)))
+        except Exception as e:  # Python 3 exception handling
+            print("%s - %s" % (a, e))
+    input("-->done")  # Use input() instead of raw_input() in Python 3
+
 
 def recover_privkey():
     db = MySQLdb.connect(*MYSQL_PARMS)
@@ -629,7 +727,7 @@ def recover_privkey():
 
         try:
             rsig = recover_key_for_r(r)
-            print "->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r
+            print ("->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r)
             recovered_sigs.append(rsig)
             cursor_insert.execute("select privkey from bitcoin.privkeys where r=unhex(%s)",(r,))
             if not cursor_insert.rowcount:
@@ -640,19 +738,17 @@ def recover_privkey():
             #cursor.executemany("UPDATE bitcoin.privkeys set address=%s, privkey=%s where r=unhex(%s)",(rsig.address, rsig.privkey_wif,r))
             pause("YAY")
         except (Exception,AssertionError) as ae:
-            print ae
+            print (ae)
             #raise ae
-        print recovered_sigs
+        print (recovered_sigs)
         pause("--next_r---")
 
-
-
-    print ""
-    print ""
-    print "                      Address                               Privkey                            r"
+    print ("")
+    print ("")
+    print ("                      Address                               Privkey                            r")
     for rsig in recovered_sigs:
-        print "Privkey recovered: ", rsig.address(), rsig.privkey_wif(), rsig.sig.r
-    print ""
+        print ("Privkey recovered: ", rsig.address(), rsig.privkey_wif(), rsig.sig.r)
+    print ("")
     raise
 
 
@@ -677,15 +773,25 @@ class DbMysql(object):
         self.cursor.execute("INSERT INTO `stats` VALUES (%s,%s) on DUPLICATE KEY UPDATE `value`=%s", (key,value,value))
         logger.info("update stats: %-40s = %s" % (key, value))
 
+    # def get_stats(self, key, default):
+    #     try:
+    #         self.cursor.execute('SELECT * FROM stats WHERE `key`=%s LIMIT 1', (key,))
+    #         for row in self.cursor.fetchall():
+    #             return row[1] if len(row[1]) else default
+    #     except Exception, e:
+    #         return default
+
+    #     return default
+    
     def get_stats(self, key, default):
         try:
             self.cursor.execute('SELECT * FROM stats WHERE `key`=%s LIMIT 1', (key,))
             for row in self.cursor.fetchall():
                 return row[1] if len(row[1]) else default
-        except Exception, e:
+        except Exception as e:  # Python 3 exception handling
             return default
-
         return default
+
 
     def commit(self):
         self.db.commit()
@@ -741,13 +847,12 @@ if __name__=="__main__":
     args = sys.argv[1:]
     if not len(args):
         time.sleep(0.5) # too lazy to look up how to flush the logger
-        print "USAGE: <mode> <args>"
-        print "\n"
-        print "examples:   this.py [selftest] import tx_in.csv.tmp  # import tx_in.csv.tmp to mysql db"
-        print "            this.py recover                          # recover nonce_reuse signatures from mysql db"
-        print "\n\n MYSQL config see var: MYSQL_PARMS "
+        print ("USAGE: <mode> <args>")
+        print ("\n")
+        print ("examples:   this.py [selftest] import tx_in.csv.tmp  # import tx_in.csv.tmp to mysql db")
+        print ("            this.py recover                          # recover nonce_reuse signatures from mysql db")
+        print ("\n\n MYSQL config see var: MYSQL_PARMS ")
         sys.exit(1)
-
 
 
     if "selftest" in args:
@@ -779,20 +884,31 @@ if __name__=="__main__":
 
         #dup_r = [bignum_to_hex(6828441658514710620715231245132541628903431519484374098968817647395811175535)]
         """
+        # for r in dup_r:
+        #     r = r.lower()
+        #     print ("r->",r)
+        #     try:
+        #         rsig = recover_key_for_r(r)
+        #         print ("->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r)
+        #         recovered_sigs.append(rsig)
+        #     except Exception, ae:
+        #         print repr(ae)
+        #         raise ae
         for r in dup_r:
             r = r.lower()
-            print "r->",r
+            print("r->", r)
             try:
                 rsig = recover_key_for_r(r)
-                print "->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r
+                print("->Privkey recovered:", rsig.address(), rsig.privkey_wif(), r)
                 recovered_sigs.append(rsig)
-            except Exception, ae:
-                print repr(ae)
+            except Exception as ae:  # Python 3 exception handling
+                print(repr(ae))
                 raise ae
 
-        print ""
-        print ""
-        print "                      Address                               Privkey                            r"
+
+        print ("")
+        print ("")
+        print ("                      Address                               Privkey                            r")
         for rsig in recovered_sigs:
-            print "Privkey recovered: ",rsig.address(), rsig.privkey_wif(), rsig.sig.r
-        print ""
+            print ("Privkey recovered: ",rsig.address(), rsig.privkey_wif(), rsig.sig.r)
+        print ("")
